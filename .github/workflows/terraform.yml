@@ -1,0 +1,61 @@
+name: Terraform (Azure)
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+
+permissions:
+  contents: read
+
+env:
+  # Folder that contains your .tf files
+  TF_WORKING_DIR: ./Terraform/04_variables
+  # Azure credentials for Terraform AzureRM provider/backend (taken from repo secrets)
+  ARM_CLIENT_ID: ${{ secrets.AZURE_AD_CLIENT_ID }}
+  ARM_CLIENT_SECRET: ${{ secrets.AZURE_AD_CLIENT_SECRET }}
+  ARM_TENANT_ID: ${{ secrets.AZURE_AD_TENTANT_ID }}
+  ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+jobs:
+  terraform:
+    name: Terraform Plan & Apply
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
+
+      - name: Terraform Init
+        run: terraform -chdir="${{ env.TF_WORKING_DIR }}" init
+
+      - name: Terraform Format
+        run: terraform -chdir="${{ env.TF_WORKING_DIR }}" fmt -check
+
+      - name: Terraform Validate
+        run: terraform -chdir="${{ env.TF_WORKING_DIR }}" validate
+
+      - name: Terraform Plan
+        run: terraform -chdir="${{ env.TF_WORKING_DIR }}" plan -input=false -no-color -out=tfplan.binary
+
+      - name: Render Plan (text)
+        if: always()
+        run: terraform -chdir="${{ env.TF_WORKING_DIR }}" show -no-color tfplan.binary > tfplan.txt
+
+      - name: Upload Plan Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: tfplan
+          path: ${{ env.TF_WORKING_DIR }}/tfplan.txt
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Terraform Apply (only on push to main)
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: terraform -chdir="${{ env.TF_WORKING_DIR }}" apply -input=false -auto-approve tfplan.binary
